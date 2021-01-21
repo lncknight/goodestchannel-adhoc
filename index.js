@@ -1,6 +1,6 @@
 let { chain, get, isNumber, size } = require('lodash')
 let bb = require('bluebird')
-let mysql = require('mysql')
+let mysql = require('mysql2/promise')
 let moment = require('moment')
 let MongoClient = require('mongodb').MongoClient
 let fs = require('fs')
@@ -14,6 +14,12 @@ const {
   MONGO_PASS,
   MONGO_DBNAME,
   MONGO_PORT,
+
+  MYSQL_HOST,
+  MYSQL_USER,
+  MYSQL_PASS,
+  MYSQL_DBNAME,
+  MYSQL_PORT,
 } = process.env
 
 let connectDbs = async () => {
@@ -22,11 +28,23 @@ let connectDbs = async () => {
     let mongoClient = await MongoClient.connect(mongoUrl, {
       useUnifiedTopology: true
     })
-
     mongoDb = mongoClient.db(MONGO_DBNAME)
+
+
+    // create the connection, specify bluebird as Promise
+    const mysqlPool = await mysql.createPool({
+      host: MYSQL_HOST,
+      user: MYSQL_USER,
+      password: MYSQL_PASS,
+      port: MYSQL_PORT,
+      database: MYSQL_DBNAME,
+      Promise: bb,
+      connectionLimit: 10,
+    });
 
     return {
       mongoDb,
+      mysqlPool,
     }
   }
   catch (err) {
@@ -45,14 +63,15 @@ let getVideoListFromTarget = async ({
   }, {
     extra: 1
   })
-    // .limit(100)
+    .limit(100)
     .toArray()
 
   return rs
 }
 
 let getVideoMetaFromSource = async ({
-  article
+  article,
+  mysqlPool,
 }) => {
 
   // e.g. XXXX_34444444
@@ -64,13 +83,15 @@ let getVideoMetaFromSource = async ({
     .trim()
     .parseInt()
     .value()
-  let anvatoId  
+  let anvatoId
   if (isNumber(tmp)) {
     anvatoId = tmp
   }
 
   // TODO mysql
-  let videoUrl = `TODO url from MYSQL by #${get(article, 'extra.anvatoId')}`
+  // let videoUrl = `TODO url from MYSQL by #${get(article, 'extra.anvatoId')}`
+  const [rows, fields] = await mysqlPool.query('SELECT * FROM `wp_lvb_posts` WHERE `id` = ?', ['2']);
+  let videoUrl = get(rows, '0.post_name')
 
   return {
     videoUrl,
@@ -97,15 +118,18 @@ let saveTarget = async ({
   }
 }
 
+const logFile = `./logs/default-${moment().format('YMMDD_HHmmss')}.log`
 let log = async (message) => {
   message = `${moment().format('Y-MM-DD HH:mm:ss')} - ${message}\n`
-  fs.appendFileSync('./logs/default.log', message)
+  fs.appendFileSync(logFile, message)
 }
 
 let main = async () => {
+  let tStart = new Date()
+
   log(`============== starting ${new Date()} ===============`)
 
-  let { mongoDb } = await connectDbs()
+  let { mongoDb, mysqlPool } = await connectDbs()
 
   let articles = await getVideoListFromTarget({
     mongoDb
@@ -116,7 +140,7 @@ let main = async () => {
   await bb.map(articles, async article => {
     let articleId = get(article, '_id')
     try {
-      let { videoUrl, anvatoId, anvatoIdHaystack } = await getVideoMetaFromSource({ article })
+      let { videoUrl, anvatoId, anvatoIdHaystack } = await getVideoMetaFromSource({ mysqlPool, article })
 
       if (!anvatoId) {
         throw new Error(`anvatoId is null or cannot be parsed, anvatoIdHaystack: ${anvatoIdHaystack}`)
@@ -139,7 +163,7 @@ let main = async () => {
     concurrency: 10,
   })
 
-  console.log('DONE')
+  log(`============== DONE used ${new Date().getTime() - tStart}ms ===============`)
 }
 
 main()
