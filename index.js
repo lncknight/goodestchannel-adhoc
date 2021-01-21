@@ -63,7 +63,7 @@ let getVideoListFromTarget = async ({
   }, {
     extra: 1
   })
-    .limit(100)
+    // .limit(100)
     .toArray()
 
   return rs
@@ -88,10 +88,20 @@ let getVideoMetaFromSource = async ({
     anvatoId = tmp
   }
 
-  // TODO mysql
+  // mysql
   // let videoUrl = `TODO url from MYSQL by #${get(article, 'extra.anvatoId')}`
-  const [rows, fields] = await mysqlPool.query('SELECT * FROM `wp_lvb_posts` WHERE `id` = ?', ['2']);
-  let videoUrl = get(rows, '0.post_name')
+  // const [rows, fields] = await mysqlPool.query('SELECT * FROM `wp_lvb_posts` WHERE `id` = ?', ['2']);
+  const [rows, fields] = await mysqlPool.query(`select * from anvato2jwplayer where anvato_id = ?`, [`MCP1_${anvatoId}`]);
+  let videos = get(rows, '0.mediaFiles')
+  // let jsonStr = get(rows, '0.mediaFiles')
+  // let videos = JSON.parse(jsonStr)
+  let videoUrl = chain(videos)
+    .map(video => {
+      return get(video, 'data.url')
+    })
+    .filter()
+    .first()
+    .value()
 
   return {
     videoUrl,
@@ -147,7 +157,7 @@ let main = async () => {
       }
 
       if (!videoUrl) {
-        throw new Error('video url not found from mapping db')
+        throw new Error(`video url not found from mapping db, anvatoId: ${anvatoId}`)
       }
 
       await saveTarget({
