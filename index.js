@@ -8,6 +8,8 @@ let dotenv = require('dotenv')
 
 dotenv.config()
 
+const dryRun = true
+
 const {
   MONGO_HOST,
   MONGO_USER,
@@ -25,10 +27,23 @@ const {
 let connectDbs = async () => {
   try {
     let mongoUrl = `mongodb://${MONGO_HOST}:${MONGO_PORT}/${MONGO_DBNAME}`
-    let mongoClient = await MongoClient.connect(mongoUrl, {
-      useUnifiedTopology: true
-    })
+    console.log('connecting..', {mongoUrl})
+
+    opts = {
+      useUnifiedTopology: false,
+      // authMechanism: 'SCRAM-SHA-1',
+      // authMechanism: '',
+    }
+    if (MONGO_USER){
+      opts.auth = {
+        user: MONGO_USER,
+        password: MONGO_PASS,
+      }
+    }
+    let mongoClient = await MongoClient.connect(mongoUrl, opts)
     mongoDb = mongoClient.db(MONGO_DBNAME)
+    console.log('connected')
+
 
 
     // create the connection, specify bluebird as Promise
@@ -41,6 +56,8 @@ let connectDbs = async () => {
       Promise: bb,
       connectionLimit: 10,
     });
+
+    log(`============== connected source DBs ===============`)
 
     return {
       mongoDb,
@@ -112,15 +129,28 @@ let getVideoMetaFromSource = async ({
 
 let saveTarget = async ({
   dryRun = true,
+  article,
   anvatoId,
   videoUrl,
+  mongoDb,
 }) => {
   // rename extra.anvatoId -> extra.anvatoIdOrig
   // videoUrl -> extra.anvatoId
 
-  log(`${dryRun ? '[DRYRUN] ' : ''}saving to target db, anvatoId: ${anvatoId}, videoUrl: ${videoUrl}`)
+  $set = {
+    "extra.anvatoId": videoUrl,
+    "extra.anvatoIdOrig": get(article, 'extra.anvatoId'),
+  }
+  log(`${dryRun ? '[DRYRUN] ' : '[WRITE] '}saving #${article._id} to target db, anvatoId: ${anvatoId}, videoUrl: ${videoUrl}, modify: ${JSON.stringify($set)}`)
 
-  // TODO save backup
+  if (!dryRun){
+    await mongoDb.collection('article').updateOne({
+      _id: article._id
+    }, {
+      $set
+    })
+  }
+
 
   let ObjectId = 'object id/...'
   return {
@@ -161,9 +191,11 @@ let main = async () => {
       }
 
       await saveTarget({
-        dryRun: true,
+        dryRun,
+        article,
         anvatoId,
         videoUrl,
+        mongoDb,
       })
     }
     catch (err) {
@@ -174,6 +206,7 @@ let main = async () => {
   })
 
   log(`============== DONE used ${new Date().getTime() - tStart}ms ===============`)
+  console.log('DONE')
 }
 
 main()
